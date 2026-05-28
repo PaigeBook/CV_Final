@@ -18,11 +18,32 @@ def overlay_mask(image: np.ndarray, mask: np.ndarray, *, color: tuple[int, int, 
     if base_image.ndim == 2:
         base_image = cv2.cvtColor(base_image, cv2.COLOR_GRAY2BGR)
 
+    # Convert colour masks to grayscale and ensure a 2D uint8 mask.
     if mask.ndim == 3:
         mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
 
+    # Normalize mask dtype to uint8 for reliable resize/threshold behaviour.
+    if mask.dtype != np.uint8:
+        mask = (mask.astype(np.uint8)).copy()
+
+    # Ensure mask matches the spatial dimensions of the base image. Some
+    # callers provide masks computed on a resized/processed image (e.g. HOG
+    # resolution) while overlay is applied to the original image. Resize the
+    # mask using nearest neighbour to preserve binary regions.
+    target_h, target_w = base_image.shape[:2]
+    if mask.shape[:2] != (target_h, target_w):
+        mask = cv2.resize(mask, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+
+    # Create overlay and apply colour where mask is positive. Use an explicit
+    # boolean index that matches the first two dimensions to avoid shape
+    # mismatch errors when numpy advanced indexing would otherwise be used.
     overlay = np.zeros_like(base_image, dtype=np.uint8)
-    overlay[mask > 0] = color
+    mask_bool = mask > 0
+    if mask_bool.shape != (target_h, target_w):
+        # As a last resort, broadcast or trim to fit.
+        mask_bool = np.resize(mask_bool, (target_h, target_w))
+
+    overlay[mask_bool, :] = color
     return cv2.addWeighted(base_image, 1.0, overlay, float(alpha), 0.0)
 
 
