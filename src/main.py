@@ -53,7 +53,7 @@ try:
 		plot_confusion_matrix,
 	)
 	from .feature_extraction import HOGParameters
-	from .preprocessing import preprocess_image
+	from .preprocessing import preprocess_image, load_original_image
 	from .segmentation import annotate_defects, segment_defects, overlay_mask
 	from .evaluation import visualize_prediction
 	from .utils import prepare_dataset_directory, select_diverse_sample_paths
@@ -93,7 +93,7 @@ except ImportError:  # pragma: no cover - fallback for direct script execution
 		plot_confusion_matrix,
 	)
 	from src.feature_extraction import HOGParameters  # type: ignore
-	from src.preprocessing import preprocess_image  # type: ignore
+	from src.preprocessing import preprocess_image, load_original_image  # type: ignore
 	from src.segmentation import annotate_defects, segment_defects, overlay_mask  # type: ignore
 	from src.evaluation import visualize_prediction  # type: ignore
 	from src.utils import prepare_dataset_directory, select_diverse_sample_paths  # type: ignore
@@ -477,7 +477,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
 	feature_visual_paths = save_hog_visualisations(
 		image_paths_test,
 		output_dirs["features"],
-		max_examples=max(5, int(args.num_sample_predictions)),
+		max_examples=min(3, max(1, int(args.num_sample_predictions))),
 		hog_parameters=hog_parameters,
 		clahe_clip=float(args.clahe_clip),
 		clahe_grid=(int(args.clahe_grid[0]), int(args.clahe_grid[1])),

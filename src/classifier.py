@@ -170,7 +170,7 @@ def build_random_forest_classifier(random_state: int = 42) -> RandomForestClassi
     """Build the HOG + Random Forest model."""
 
     return RandomForestClassifier(
-        n_estimators=300,
+        n_estimators=150,
         random_state=random_state,
         class_weight="balanced_subsample",
         n_jobs=-1,
