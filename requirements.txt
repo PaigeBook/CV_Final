@@ -1,0 +1,11 @@
+numpy
+opencv-python
+scikit-image
+scikit-learn
+matplotlib
+numpy
+opencv-python
+scikit-image
+scikit-learn
+matplotlib
+joblib
