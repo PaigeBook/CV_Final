@@ -114,20 +114,9 @@ def build_argument_parser() -> argparse.ArgumentParser:
 	parser.add_argument("--baseline-model-path", type=Path, default=Path("models/mri_baseline.joblib"), help="Path where the raw-pixel baseline model is saved")
 	parser.add_argument("--test-size", type=float, default=0.2, help="Fraction of the dataset reserved for testing")
 	parser.add_argument("--hog-size", type=int, nargs=2, metavar=("WIDTH", "HEIGHT"), default=(224, 224), help="Resize images before HOG extraction")
-	parser.add_argument("--hog-orientations", type=int, default=9, help="Number of HOG orientation bins")
-	parser.add_argument("--hog-pixels-per-cell", type=int, nargs=2, metavar=("X", "Y"), default=(8, 8), help="HOG pixels per cell")
-	parser.add_argument("--hog-cells-per-block", type=int, nargs=2, metavar=("X", "Y"), default=(2, 2), help="HOG cells per block")
-	parser.add_argument("--baseline-image-size", type=int, nargs=2, metavar=("WIDTH", "HEIGHT"), default=(128, 128), help="Resize size for the raw-pixel baseline model")
-	parser.add_argument("--svm-kernel", type=str, default="rbf", help="SVM kernel type")
-	parser.add_argument("--svm-c", type=float, default=5.0, help="SVM regularisation strength")
 	parser.add_argument("--morph-kernel-size", type=int, default=5, help="Morphological kernel size used during ROI segmentation")
 	parser.add_argument("--skip-baseline", action="store_true", help="Skip training the raw-pixel baseline model")
-	parser.add_argument("--segmentation-method", type=str, default="mri_enhanced", choices=["edge", "hybrid", "watershed", "mri_enhanced"], help="Segmentation approach for tumour candidates")
-	parser.add_argument("--num-sample-predictions", type=int, default=5, help="Number of annotated sample images to save")
-	parser.add_argument("--use-glcm", action="store_true", help="Include GLCM texture features alongside HOG")
-	parser.add_argument("--use-orb", action="store_true", help="Include ORB descriptor summary alongside HOG")
-	parser.add_argument("--clahe-clip", type=float, default=2.0, help="CLAHE clip limit for contrast enhancement")
-	parser.add_argument("--clahe-grid", type=int, nargs=2, metavar=("X", "Y"), default=(8, 8), help="CLAHE tile grid size")
+	parser.add_argument("--num-sample-predictions", type=int, default=3, help="Number of annotated sample images to save")
 	return parser
 
 
@@ -136,8 +125,6 @@ def ensure_output_directories(output_dir: Path) -> dict[str, Path]:
 
 	paths = {
 		"root": output_dir,
-		"figures": output_dir / "figures",
-		"predictions": output_dir / "predictions",
 		"gallery": output_dir / "gallery",
 		"features": output_dir / "features",
 		"misclassified": output_dir / "misclassified",
@@ -213,7 +200,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
 	preprocessing_settings = build_preprocessing_settings(args)
 
 	dataset = load_dataset(dataset_dir, preprocess=False)
-	plot_class_distribution(dataset.labels, output_path=output_dirs["figures"] / "class_distribution.png")
+	plot_class_distribution(dataset.labels, output_path=output_dirs["comparisons"] / "class_distribution.png")
 
 	preprocessed_images: list[np.ndarray] = []
 	hog_ready_images: list[np.ndarray] = []
@@ -328,12 +315,12 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
 	# Save confusion matrices for all methods using the same class order.
 	present = set(dataset.labels.tolist())
 	class_names = [c for c in ("no_tumour", "tumour") if c in present]
-	figure = plot_confusion_matrix(split.y_test, svm_predictions, class_names, output_path=output_dirs["figures"] / "confusion_matrix_svm.png")
+	figure = plot_confusion_matrix(split.y_test, svm_predictions, class_names, output_path=output_dirs["comparisons"] / "confusion_matrix_svm.png")
 	plt.close(figure)
-	figure = plot_confusion_matrix(split.y_test, rf_y_pred, class_names, output_path=output_dirs["figures"] / "confusion_matrix_rf.png")
+	figure = plot_confusion_matrix(split.y_test, rf_y_pred, class_names, output_path=output_dirs["comparisons"] / "confusion_matrix_rf.png")
 	plt.close(figure)
 	if baseline_y_pred is not None:
-		figure = plot_confusion_matrix(split.y_test, baseline_y_pred, class_names, output_path=output_dirs["figures"] / "confusion_matrix_baseline.png")
+		figure = plot_confusion_matrix(split.y_test, baseline_y_pred, class_names, output_path=output_dirs["comparisons"] / "confusion_matrix_baseline.png")
 		plt.close(figure)
 
 	# Save classification reports and scalar metrics.

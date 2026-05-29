@@ -73,7 +73,7 @@ def run_pipeline(config: ProjectConfig, sample_limit: int = 4) -> dict[str, obje
     model.fit(split.x_train, split.y_train)
 
     metrics = evaluate_classifier(model, split.x_test, split.y_test)
-    save_confusion_matrix(metrics["confusion_matrix"], output_paths["figures"] / "confusion_matrix.png")
+    save_confusion_matrix(metrics["confusion_matrix"], output_paths["reports"] / "comparisons" / "confusion_matrix.png")
 
     sample_count = min(sample_limit, len(previews))
     selected_indices = np.random.default_rng(config.random_state).choice(
@@ -100,7 +100,7 @@ def run_pipeline(config: ProjectConfig, sample_limit: int = 4) -> dict[str, obje
 
     save_case_comparison_grid(
         comparison_items,
-        output_paths["figures"] / "random_case_comparison.png",
+        output_paths["reports"] / "comparisons" / "random_case_comparison.png",
     )
 
     report_path = output_paths["reports"] / "metrics.txt"

@@ -10,15 +10,21 @@ import numpy as np
 
 
 def ensure_output_structure(output_dir: Path) -> dict[str, Path]:
-    figures_dir = output_dir / "figures"
+    """Create a minimal, consolidated output structure.
+
+    We avoid a separate `figures/` folder and instead place report figures
+    under `reports/comparisons` to reduce duplication.
+    """
+
     cases_dir = output_dir / "cases"
     reports_dir = output_dir / "reports"
-    for directory in (output_dir, figures_dir, cases_dir, reports_dir):
+    comparisons_dir = reports_dir / "comparisons"
+    for directory in (output_dir, cases_dir, reports_dir, comparisons_dir):
         directory.mkdir(parents=True, exist_ok=True)
     return {
-        "figures": figures_dir,
         "cases": cases_dir,
         "reports": reports_dir,
+        "comparisons": comparisons_dir,
     }
 
 
