@@ -12,6 +12,7 @@ from skimage.feature import hog
 from .classifier import PreprocessingSettings, infer_label_from_path, predict_image
 from .preprocessing import load_original_image, preprocess_image
 from .segmentation import overlay_mask, segment_suspicious_region
+from .visualization import save_case_artifacts
 
 
 def _ensure_bgr(image: np.ndarray) -> np.ndarray:
@@ -104,13 +105,9 @@ def save_visual_summary(
 
 
 def _gallery_folder(predicted_label: str, ground_truth_label: str | None) -> str:
-    if ground_truth_label is None:
-        return "misclassified"
-    if predicted_label == ground_truth_label == "tumour":
-        return "correct_tumour"
-    if predicted_label == ground_truth_label == "no_tumour":
-        return "correct_normal"
-    return "misclassified"
+    if ground_truth_label is not None and predicted_label == ground_truth_label:
+        return "correct"
+    return "incorrect"
 
 
 def save_annotated_predictions(
@@ -129,24 +126,16 @@ def save_annotated_predictions(
     morph_kernel_size: int = 5,
     ground_truth_root: Path | None = None,
 ) -> list[Path]:
-    """Save gallery-style prediction figures grouped by outcome.
-
-    The same helper is used for both the report gallery and the per-image
-    predictions. Each image includes the original MRI, the segmented overlay,
-    the predicted label, the optional ground-truth label, and the confidence
-    score when the estimator exposes it.
-    """
+    """Save a small set of prediction composites grouped by outcome."""
 
     del figures_dir  # The pipeline keeps the report assets under the gallery tree.
     del segmentation_method  # The classical segmentation path is fixed in this project.
     del use_clahe  # Kept for CLI compatibility.
 
     output_dir = Path(output_dir)
-    gallery_root = output_dir / "gallery"
     folders = {
-        "correct_tumour": gallery_root / "correct_tumour",
-        "correct_normal": gallery_root / "correct_normal",
-        "misclassified": gallery_root / "misclassified",
+        "correct": output_dir / "correct",
+        "incorrect": output_dir / "incorrect",
     }
     for folder in folders.values():
         folder.mkdir(parents=True, exist_ok=True)
@@ -167,6 +156,7 @@ def save_annotated_predictions(
             hog_parameters=hog_parameters,
             use_glcm=use_glcm,
             use_orb=use_orb,
+            full_image=enhanced_image,
         )
 
         if ground_truth_root is not None:
@@ -177,11 +167,9 @@ def save_annotated_predictions(
 
         folder_name = _gallery_folder(predicted_label, ground_truth_label)
         output_folder = folders[folder_name]
-        output_path = output_folder / (
-            f"sample_{index:03d}_{image_path.stem}_gt-{ground_truth_label or 'unknown'}_pred-{predicted_label}_conf-{confidence:.3f}.png"
-        )
+        output_path = output_folder / f"prediction_{index:03d}_{image_path.stem}_pred-{predicted_label}_conf-{confidence:.3f}.png"
 
-        save_visual_summary(
+        save_case_artifacts(
             original_image,
             enhanced_image,
             segmentation_mask,
@@ -230,8 +218,8 @@ def save_hog_visualisations(
         del hog_features
 
         figure, axes = plt.subplots(1, 2, figsize=(10, 4))
-        axes[0].imshow(enhanced_image, cmap="gray")
-        axes[0].set_title("Preprocessed MRI")
+        axes[0].imshow(cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB) if original_image.ndim == 3 else original_image, cmap="gray")
+        axes[0].set_title("Original MRI")
         axes[0].axis("off")
         axes[1].imshow(hog_image, cmap="gray")
         axes[1].set_title("HOG representation")

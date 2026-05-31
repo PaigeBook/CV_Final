@@ -22,82 +22,70 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 try:
-	from .classifier import (
-		build_baseline_classifier,
-		build_svm_classifier,
-		build_random_forest_classifier,
-		load_dataset,
-		infer_label_from_path,
-		predict_image,
-		predict_features_with_confidence,
-		predict_features,
-		prepare_feature_matrix,
-		prepare_raw_pixel_matrix,
-		save_model,
-		split_dataset,
-		train_classifier,
-		PreprocessingSettings,
-		SVMConfig,
-	)
-	from .evaluation import (
-		compute_metrics,
-		format_metric_summary,
-		format_timing_summary,
-		generate_classification_report_text,
-		save_false_negative_examples,
-		save_efficiency_report,
-		save_method_comparison_report,
-		save_multi_method_comparison_report,
-		save_multi_method_comparison_report_with_timing,
-		plot_class_distribution,
-		plot_confusion_matrix,
-	)
-	from .feature_extraction import HOGParameters
-	from .preprocessing import preprocess_image, load_original_image
-	from .segmentation import annotate_defects, segment_defects, overlay_mask
-	from .evaluation import visualize_prediction
-	from .utils import prepare_dataset_directory, select_diverse_sample_paths
-	from .viz import overlay_label, save_visual_summary, save_annotated_predictions, save_hog_visualisations
+    from .classifier import (
+        PreprocessingSettings,
+        SVMConfig,
+        build_baseline_classifier,
+        build_random_forest_classifier,
+        build_svm_classifier,
+        infer_label_from_path,
+        load_dataset,
+        load_model,
+        predict_features,
+        predict_features_with_confidence,
+        predict_image,
+        prepare_feature_matrix,
+        prepare_raw_pixel_matrix,
+        save_model,
+        split_dataset,
+        train_classifier,
+    )
+    from .evaluation import (
+        compute_metrics,
+        format_metric_summary,
+        format_timing_summary,
+        plot_confusion_matrix,
+    )
+    from .feature_extraction import HOGParameters
+    from .preprocessing import load_original_image, preprocess_image
+    from .segmentation import segment_defects
+    from .utils import prepare_dataset_directory, select_diverse_sample_paths
+    from .viz import save_hog_visualisations
+    from .visualization import save_case_artifacts
 except ImportError:  # pragma: no cover - fallback for direct script execution
-	project_root = Path(__file__).resolve().parents[1]
-	if str(project_root) not in sys.path:
-		sys.path.insert(0, str(project_root))
-	from src.classifier import (  # type: ignore
-		build_baseline_classifier,
-		build_svm_classifier,
-		build_random_forest_classifier,
-		load_dataset,
-		infer_label_from_path,
-		predict_image,
-		predict_features_with_confidence,
-		predict_features,
-		prepare_feature_matrix,
-		prepare_raw_pixel_matrix,
-		save_model,
-		split_dataset,
-		train_classifier,
-		PreprocessingSettings,
-		SVMConfig,
-	)
-	from src.evaluation import (  # type: ignore
-		compute_metrics,
-		format_metric_summary,
-		format_timing_summary,
-		generate_classification_report_text,
-		save_false_negative_examples,
-		save_efficiency_report,
-		save_method_comparison_report,
-		save_multi_method_comparison_report,
-		save_multi_method_comparison_report_with_timing,
-		plot_class_distribution,
-		plot_confusion_matrix,
-	)
-	from src.feature_extraction import HOGParameters  # type: ignore
-	from src.preprocessing import preprocess_image, load_original_image  # type: ignore
-	from src.segmentation import annotate_defects, segment_defects, overlay_mask  # type: ignore
-	from src.evaluation import visualize_prediction  # type: ignore
-	from src.utils import prepare_dataset_directory, select_diverse_sample_paths  # type: ignore
-	from src.viz import overlay_label, save_visual_summary, save_annotated_predictions, save_hog_visualisations  # type: ignore
+    project_root = Path(__file__).resolve().parents[1]
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    from src.classifier import (  # type: ignore
+        PreprocessingSettings,
+        SVMConfig,
+        build_baseline_classifier,
+        build_random_forest_classifier,
+        build_svm_classifier,
+        infer_label_from_path,
+        load_dataset,
+        load_model,
+        predict_features,
+        predict_features_with_confidence,
+        predict_image,
+        prepare_feature_matrix,
+        prepare_raw_pixel_matrix,
+        save_model,
+        split_dataset,
+        train_classifier,
+    )
+    from src.evaluation import (  # type: ignore
+        compute_metrics,
+        format_metric_summary,
+        format_timing_summary,
+        plot_confusion_matrix,
+    )
+    from src.feature_extraction import HOGParameters  # type: ignore
+    from src.preprocessing import load_original_image, preprocess_image  # type: ignore
+    from src.segmentation import segment_defects  # type: ignore
+    from src.utils import prepare_dataset_directory, select_diverse_sample_paths  # type: ignore
+    from src.viz import save_hog_visualisations  # type: ignore
+    from src.visualization import save_case_artifacts  # type: ignore
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -116,6 +104,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
 	parser.add_argument("--hog-size", type=int, nargs=2, metavar=("WIDTH", "HEIGHT"), default=(224, 224), help="Resize images before HOG extraction")
 	parser.add_argument("--morph-kernel-size", type=int, default=5, help="Morphological kernel size used during ROI segmentation")
 	parser.add_argument("--skip-baseline", action="store_true", help="Skip training the raw-pixel baseline model")
+	parser.add_argument("--force-train", action="store_true", help="Retrain models even if saved versions already exist")
+	parser.add_argument("--generate-assets", action="store_true", help="Generate false-negative, gallery, and HOG review assets")
+	parser.add_argument("--preserve-outputs", action="store_true", help="Skip automatic clearing of generated output folders at startup")
+	parser.add_argument("--reset-reports", action="store_true", help="Delete output reports before running to avoid accumulated files")
+	parser.add_argument("--max-false-negatives", type=int, default=10, help="Maximum false-negative examples to export")
 	parser.add_argument("--num-sample-predictions", type=int, default=3, help="Number of annotated sample images to save")
 	return parser
 
@@ -123,20 +116,67 @@ def build_argument_parser() -> argparse.ArgumentParser:
 def ensure_output_directories(output_dir: Path) -> dict[str, Path]:
 	"""Create output folders."""
 
-	paths = {
+	evaluation_dir = output_dir / "evaluation"
+	predictions_dir = output_dir / "predictions"
+	predictions_correct_dir = predictions_dir / "correct"
+	predictions_incorrect_dir = predictions_dir / "incorrect"
+	features_dir = output_dir / "features"
+	hog_examples_dir = features_dir / "hog_examples"
+	runtime_dir = output_dir / "runtime"
+
+	for d in (output_dir, evaluation_dir, predictions_dir, predictions_correct_dir, predictions_incorrect_dir, features_dir, hog_examples_dir, runtime_dir):
+		d.mkdir(parents=True, exist_ok=True)
+
+	paths: dict[str, Path] = {
 		"root": output_dir,
-		"gallery": output_dir / "gallery",
-		"features": output_dir / "features",
-		"misclassified": output_dir / "misclassified",
-		"false_negatives": output_dir / "misclassified" / "false_negatives",
-		"reports": output_dir / "reports",
-		"comparisons": output_dir / "reports" / "comparisons",
-		"models": output_dir / "models",
-		"logs": output_dir / "logs",
+		"evaluation": evaluation_dir,
+		"predictions": predictions_dir,
+		"predictions_correct": predictions_correct_dir,
+		"predictions_incorrect": predictions_incorrect_dir,
+		"features": features_dir,
+		"hog_examples": hog_examples_dir,
+		"runtime": runtime_dir,
 	}
-	for path in paths.values():
-		path.mkdir(parents=True, exist_ok=True)
+
+	# Backwards-compatible aliases used by older code paths.
+	paths["reports"] = evaluation_dir
+	paths["comparisons"] = evaluation_dir
+	paths["gallery"] = predictions_dir
+	paths["misclassified"] = predictions_incorrect_dir
+	paths["figures"] = predictions_dir
+	paths["cases"] = predictions_dir
+	paths["false_negatives"] = predictions_incorrect_dir
+
 	return paths
+
+
+def clear_generated_output_contents(output_dirs: dict[str, Path]) -> None:
+	"""Remove generated files from prior runs while preserving the folder tree."""
+
+	print("[INFO] Clearing previous generated outputs...")
+	legacy_root_dirs = ["cases", "gallery", "misclassified", "reports", "logs", "models"]
+	for legacy_name in legacy_root_dirs:
+		legacy_path = output_dirs["root"] / legacy_name
+		if legacy_path.exists():
+			shutil.rmtree(legacy_path)
+
+	paths_to_clear = [
+		output_dirs["evaluation"],
+		output_dirs["predictions"],
+		output_dirs["predictions_correct"],
+		output_dirs["predictions_incorrect"],
+		output_dirs["features"],
+		output_dirs["hog_examples"],
+		output_dirs["runtime"],
+	]
+
+	for directory in paths_to_clear:
+		directory.mkdir(parents=True, exist_ok=True)
+		for child in list(directory.iterdir()):
+			if child.is_dir():
+				shutil.rmtree(child)
+			else:
+				child.unlink()
 
 
 # prepare_dataset_directory moved to src.utils
@@ -150,16 +190,13 @@ def build_hog_parameters(args: argparse.Namespace) -> HOGParameters:
 
 	return HOGParameters(
 		resize_to=(int(args.hog_size[0]), int(args.hog_size[1])),
-		orientations=int(args.hog_orientations),
-		pixels_per_cell=(int(args.hog_pixels_per_cell[0]), int(args.hog_pixels_per_cell[1])),
-		cells_per_block=(int(args.hog_cells_per_block[0]), int(args.hog_cells_per_block[1])),
 	)
 
 
 def build_svm_config(args: argparse.Namespace, hog_parameters: HOGParameters) -> SVMConfig:
 	"""Build SVM config from CLI args."""
 
-	return SVMConfig(kernel=args.svm_kernel, c=args.svm_c, hog_parameters=hog_parameters)
+	return SVMConfig(hog_parameters=hog_parameters)
 
 
 def build_preprocessing_settings(args: argparse.Namespace) -> PreprocessingSettings:
@@ -168,8 +205,8 @@ def build_preprocessing_settings(args: argparse.Namespace) -> PreprocessingSetti
 	return PreprocessingSettings(
 		image_size=(int(args.hog_size[0]), int(args.hog_size[1])),
 		gaussian_kernel=(5, 5),
-		clahe_clip_limit=float(args.clahe_clip),
-		clahe_tile_grid_size=(int(args.clahe_grid[0]), int(args.clahe_grid[1])),
+		clahe_clip_limit=2.0,
+		clahe_tile_grid_size=(8, 8),
 	)
 
 
@@ -186,6 +223,15 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
 	"""Run training, evaluation, and output generation."""
 
 	output_dirs = ensure_output_directories(args.output_dir)
+	if not getattr(args, "preserve_outputs", False):
+		clear_generated_output_contents(output_dirs)
+		if getattr(args, "reset_reports", False):
+			reports_to_clear = output_dirs["reports"]
+			for child in list(reports_to_clear.iterdir()):
+				if child.is_dir():
+					shutil.rmtree(child)
+				else:
+					child.unlink()
 	project_root = Path(__file__).resolve().parents[1]
 	dataset_dir = prepare_dataset_directory(args.dataset_dir, project_root)
 
@@ -200,7 +246,6 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
 	preprocessing_settings = build_preprocessing_settings(args)
 
 	dataset = load_dataset(dataset_dir, preprocess=False)
-	plot_class_distribution(dataset.labels, output_path=output_dirs["comparisons"] / "class_distribution.png")
 
 	preprocessed_images: list[np.ndarray] = []
 	hog_ready_images: list[np.ndarray] = []
@@ -240,11 +285,12 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
 		raw_pixel_images.append(image)
 
 	feature_start = perf_counter()
-	hog_features = prepare_feature_matrix(hog_ready_images, hog_parameters=hog_parameters, use_glcm=args.use_glcm, use_orb=args.use_orb)
+	# Build concatenated HOG features: full enhanced image + ROI-masked image
+	hog_features = prepare_feature_matrix(hog_ready_images, hog_parameters=hog_parameters, full_images=preprocessed_images)
 	feature_extraction_time_seconds = perf_counter() - feature_start
 
 	raw_feature_start = perf_counter()
-	raw_pixel_features = prepare_raw_pixel_matrix(raw_pixel_images, resize_to=(int(args.baseline_image_size[0]), int(args.baseline_image_size[1])))
+	raw_pixel_features = prepare_raw_pixel_matrix(raw_pixel_images, resize_to=(128, 128))
 	baseline_feature_extraction_time_seconds = perf_counter() - raw_feature_start
 
 	split = split_dataset(hog_features, dataset.labels, test_size=args.test_size, random_state=42)
@@ -256,19 +302,37 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
 	test_masks = [suspicious_masks[int(index)] for index in test_indices]
 	preprocessed_test_images = [preprocessed_images[int(index)] for index in test_indices]
 
-	model = build_svm_classifier(svm_config)
-	try:
-		svm_train_start = perf_counter()
-		train_classifier(model, split.x_train, split.y_train)
-		svm_training_time_seconds = perf_counter() - svm_train_start
-	except Exception as exc:
-		print(f"[ERROR] SVM training failed: {exc}")
-		svm_training_time_seconds = 0.0
+	svm_model_path = Path(args.model_path)
+	rf_model_path = Path(args.rf_model_path)
+	baseline_model_path = Path(args.baseline_model_path)
+	svm_model = None
+	rf_model = None
+	baseline_model = None
+	svm_trained = False
+	rf_trained = False
+	baseline_trained = False
+
+	if not args.force_train and svm_model_path.exists():
+		try:
+			svm_model = load_model(svm_model_path)
+			print(f"Loaded existing SVM model from: {svm_model_path}")
+		except Exception as exc:
+			print(f"[WARN] Failed to load SVM model, retraining instead: {exc}")
+	if svm_model is None:
+		svm_model = build_svm_classifier(svm_config)
+		try:
+			svm_train_start = perf_counter()
+			train_classifier(svm_model, split.x_train, split.y_train)
+			svm_training_time_seconds = perf_counter() - svm_train_start
+			svm_trained = True
+		except Exception as exc:
+			print(f"[ERROR] SVM training failed: {exc}")
+			svm_training_time_seconds = 0.0
 
 	# Evaluate the HOG + SVM model on the shared test split.
 	try:
 		svm_inference_start = perf_counter()
-		svm_predictions, svm_confidences = predict_features_with_confidence(model, split.x_test)
+		svm_predictions, svm_confidences = predict_features_with_confidence(svm_model, split.x_test)
 		svm_inference_total = perf_counter() - svm_inference_start
 		svm_inference_time_per_image_seconds = svm_inference_total / max(len(split.x_test), 1)
 		classification_time_seconds = svm_inference_time_per_image_seconds
@@ -281,120 +345,87 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
 
 	# Train and evaluate Random Forest as an alternative classifier.
 	rf_metrics = {"accuracy": 0.0, "precision_macro": 0.0, "recall_macro": 0.0, "f1_macro": 0.0}
-	try:
-		rf_model = build_random_forest_classifier()
-		rf_train_start = perf_counter()
-		train_classifier(rf_model, split.x_train, split.y_train)
-		rf_training_time_seconds = perf_counter() - rf_train_start
-		rf_inference_start = perf_counter()
-		rf_y_pred = predict_features(rf_model, split.x_test)
-		rf_inference_total = perf_counter() - rf_inference_start
-		rf_inference_time_per_image_seconds = rf_inference_total / max(len(split.x_test), 1)
-		rf_metrics = compute_metrics(split.y_test, rf_y_pred)
-	except Exception as exc:
-		print(f"[WARN] Random Forest training/evaluation failed: {exc}")
+	rf_y_pred = np.array([])
+	if not args.force_train and rf_model_path.exists():
+		try:
+			rf_model = load_model(rf_model_path)
+			print(f"Loaded existing Random Forest model from: {rf_model_path}")
+		except Exception as exc:
+			print(f"[WARN] Failed to load Random Forest model, retraining instead: {exc}")
+	if rf_model is None:
+		try:
+			rf_model = build_random_forest_classifier()
+			rf_train_start = perf_counter()
+			train_classifier(rf_model, split.x_train, split.y_train)
+			rf_training_time_seconds = perf_counter() - rf_train_start
+			rf_trained = True
+		except Exception as exc:
+			print(f"[WARN] Random Forest training/evaluation failed: {exc}")
+	if rf_model is not None:
+		try:
+			rf_inference_start = perf_counter()
+			rf_y_pred = predict_features(rf_model, split.x_test)
+			rf_inference_total = perf_counter() - rf_inference_start
+			rf_inference_time_per_image_seconds = rf_inference_total / max(len(split.x_test), 1)
+			rf_metrics = compute_metrics(split.y_test, rf_y_pred)
+		except Exception as exc:
+			print(f"[WARN] Random Forest evaluation failed: {exc}")
 
 	baseline_metrics: dict[str, object] | None = None
-	baseline_model = None
 	baseline_y_pred: np.ndarray | None = None
 	if not args.skip_baseline:
-		try:
-			baseline_model = build_baseline_classifier()
-			baseline_train_start = perf_counter()
-			train_classifier(baseline_model, raw_pixel_features[train_indices], split.y_train)
-			baseline_training_time_seconds = perf_counter() - baseline_train_start
-			baseline_inference_start = perf_counter()
-			baseline_y_pred = predict_features(baseline_model, raw_x_test)
-			baseline_inference_total = perf_counter() - baseline_inference_start
-			baseline_inference_time_per_image_seconds = baseline_inference_total / max(len(split.x_test), 1)
-			baseline_metrics = compute_metrics(split.y_test, baseline_y_pred)
-		except Exception as exc:
-			print(f"[WARN] Baseline training/evaluation failed: {exc}")
-			baseline_metrics = {"accuracy": 0.0, "precision_macro": 0.0, "recall_macro": 0.0, "f1_macro": 0.0}
+		if not args.force_train and baseline_model_path.exists():
+			try:
+				baseline_model = load_model(baseline_model_path)
+				print(f"Loaded existing baseline model from: {baseline_model_path}")
+			except Exception as exc:
+				print(f"[WARN] Failed to load baseline model, retraining instead: {exc}")
+		if baseline_model is None:
+			try:
+				baseline_model = build_baseline_classifier()
+				baseline_train_start = perf_counter()
+				train_classifier(baseline_model, raw_pixel_features[train_indices], split.y_train)
+				baseline_training_time_seconds = perf_counter() - baseline_train_start
+				baseline_trained = True
+			except Exception as exc:
+				print(f"[WARN] Baseline training/evaluation failed: {exc}")
+		if baseline_model is not None:
+			try:
+				baseline_inference_start = perf_counter()
+				baseline_y_pred = predict_features(baseline_model, raw_x_test)
+				baseline_inference_total = perf_counter() - baseline_inference_start
+				baseline_inference_time_per_image_seconds = baseline_inference_total / max(len(split.x_test), 1)
+				baseline_metrics = compute_metrics(split.y_test, baseline_y_pred)
+			except Exception as exc:
+				print(f"[WARN] Baseline evaluation failed: {exc}")
+				baseline_metrics = {"accuracy": 0.0, "precision_macro": 0.0, "recall_macro": 0.0, "f1_macro": 0.0}
 
-	# Save confusion matrices for all methods using the same class order.
+	# Save evaluation outputs in the consolidated evaluation folder.
 	present = set(dataset.labels.tolist())
 	class_names = [c for c in ("no_tumour", "tumour") if c in present]
-	figure = plot_confusion_matrix(split.y_test, svm_predictions, class_names, output_path=output_dirs["comparisons"] / "confusion_matrix_svm.png")
+	figure = plot_confusion_matrix(split.y_test, svm_predictions, class_names, output_path=output_dirs["evaluation"] / "confusion_matrix_svm.png")
 	plt.close(figure)
-	figure = plot_confusion_matrix(split.y_test, rf_y_pred, class_names, output_path=output_dirs["comparisons"] / "confusion_matrix_rf.png")
-	plt.close(figure)
-	if baseline_y_pred is not None:
-		figure = plot_confusion_matrix(split.y_test, baseline_y_pred, class_names, output_path=output_dirs["comparisons"] / "confusion_matrix_baseline.png")
+	if rf_y_pred.size:
+		figure = plot_confusion_matrix(split.y_test, rf_y_pred, class_names, output_path=output_dirs["evaluation"] / "confusion_matrix_rf.png")
 		plt.close(figure)
+	evaluation_text_lines = [
+		"# Evaluation Summary\n\n",
+		"## HOG + SVM\n\n",
+		format_metric_summary(svm_metrics),
+		f"Confusion matrix: {svm_metrics.get('confusion_matrix', [])}\n\n",
+		"## HOG + Random Forest\n\n",
+		format_metric_summary(rf_metrics),
+		f"Confusion matrix: {rf_metrics.get('confusion_matrix', [])}\n",
+	]
+	(output_dirs["evaluation"] / "metrics.txt").write_text("".join(evaluation_text_lines), encoding="utf-8")
 
-	# Save classification reports and scalar metrics.
-	(report_dir := output_dirs["reports"]).mkdir(parents=True, exist_ok=True)
-	(report_dir / "classification_report_svm.txt").write_text(generate_classification_report_text(split.y_test, svm_predictions), encoding="utf-8")
-	(report_dir / "classification_report_rf.txt").write_text(generate_classification_report_text(split.y_test, rf_y_pred), encoding="utf-8")
-	if baseline_y_pred is not None:
-		(report_dir / "classification_report_baseline.txt").write_text(generate_classification_report_text(split.y_test, baseline_y_pred), encoding="utf-8")
-	(report_dir / "metrics_svm.txt").write_text(format_metric_summary(svm_metrics), encoding="utf-8")
-	(report_dir / "metrics_rf.txt").write_text(format_metric_summary(rf_metrics), encoding="utf-8")
-	if baseline_metrics is not None:
-		(report_dir / "metrics_baseline.txt").write_text(format_metric_summary(baseline_metrics), encoding="utf-8")
-	(report_dir / "timing.txt").write_text(
-		format_timing_summary(
-			{
-				"preprocessing_time_seconds": preprocessing_time_seconds / max(len(dataset.images), 1),
-				"segmentation_time_seconds": segmentation_time_seconds / max(len(dataset.images), 1),
-				"feature_extraction_time_seconds": feature_extraction_time_seconds / max(len(dataset.images), 1),
-				"classification_time_seconds": classification_time_seconds,
-				"total_inference_time_per_image_seconds": (preprocessing_time_seconds + segmentation_time_seconds + feature_extraction_time_seconds) / max(len(dataset.images), 1) + classification_time_seconds,
-				"svm_training_time_seconds": svm_training_time_seconds,
-				"rf_training_time_seconds": rf_training_time_seconds,
-				"baseline_training_time_seconds": baseline_training_time_seconds,
-				"svm_inference_time_per_image_seconds": svm_inference_time_per_image_seconds,
-				"rf_inference_time_per_image_seconds": rf_inference_time_per_image_seconds,
-				"baseline_inference_time_per_image_seconds": baseline_inference_time_per_image_seconds,
-			}
-		),
-		encoding="utf-8",
-	)
-
-	# Save a multi-method comparison report.
-	method_metrics: dict[str, dict[str, object]] = {"HOG + SVM": svm_metrics, "HOG + Random Forest": rf_metrics}
-	if baseline_metrics is not None:
-		method_metrics["Raw Pixels + Logistic Regression"] = baseline_metrics
-	save_multi_method_comparison_report_with_timing(
-		method_metrics,
-		output_dirs["comparisons"] / "method_comparison.md",
-		{
-			"preprocessing_time_seconds": preprocessing_time_seconds / max(len(dataset.images), 1),
-			"segmentation_time_seconds": segmentation_time_seconds / max(len(dataset.images), 1),
-			"feature_extraction_time_seconds": feature_extraction_time_seconds / max(len(dataset.images), 1),
-			"classification_time_seconds": classification_time_seconds,
-			"total_inference_time_per_image_seconds": (preprocessing_time_seconds + segmentation_time_seconds + feature_extraction_time_seconds) / max(len(dataset.images), 1) + classification_time_seconds,
-			"svm_training_time_seconds": svm_training_time_seconds,
-			"rf_training_time_seconds": rf_training_time_seconds,
-			"baseline_training_time_seconds": baseline_training_time_seconds,
-			"svm_inference_time_per_image_seconds": svm_inference_time_per_image_seconds,
-			"rf_inference_time_per_image_seconds": rf_inference_time_per_image_seconds,
-			"baseline_inference_time_per_image_seconds": baseline_inference_time_per_image_seconds,
-		},
-	)
-	save_efficiency_report(
-		{
-			"preprocessing_time_seconds": preprocessing_time_seconds / max(len(dataset.images), 1),
-			"segmentation_time_seconds": segmentation_time_seconds / max(len(dataset.images), 1),
-			"feature_extraction_time_seconds": feature_extraction_time_seconds / max(len(dataset.images), 1),
-			"classification_time_seconds": classification_time_seconds,
-			"total_inference_time_per_image_seconds": (preprocessing_time_seconds + segmentation_time_seconds + feature_extraction_time_seconds) / max(len(dataset.images), 1) + classification_time_seconds,
-			"svm_training_time_seconds": svm_training_time_seconds,
-			"rf_training_time_seconds": rf_training_time_seconds,
-			"baseline_training_time_seconds": baseline_training_time_seconds,
-			"svm_inference_time_per_image_seconds": svm_inference_time_per_image_seconds,
-			"rf_inference_time_per_image_seconds": rf_inference_time_per_image_seconds,
-			"baseline_inference_time_per_image_seconds": baseline_inference_time_per_image_seconds,
-		},
-		output_dirs["comparisons"] / "efficiency_metrics.md",
-	)
-
-	# Persist models.
-	save_model(model, args.model_path)
-	save_model(rf_model, args.rf_model_path)
-	if baseline_model is not None:
-		save_model(baseline_model, args.baseline_model_path)
+	# Persist models only after fresh training.
+	if svm_trained:
+		save_model(svm_model, svm_model_path)
+	if rf_trained:
+		save_model(rf_model, rf_model_path)
+	if baseline_model is not None and baseline_trained:
+		save_model(baseline_model, baseline_model_path)
 
 	# Run a compact per-image inference timing pass on the SVM model.
 	# This keeps the timing numbers tied to the medical-review output that is
@@ -418,11 +449,11 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
 			masked_image[suspicious_mask == 0] = 0
 
 			stage_start = perf_counter()
-			feature_vector = prepare_feature_matrix([masked_image], hog_parameters=hog_parameters, use_glcm=args.use_glcm, use_orb=args.use_orb)
+			feature_vector = prepare_feature_matrix([masked_image], hog_parameters=hog_parameters, full_images=[enhanced_image])
 			timing_features += perf_counter() - stage_start
 
 			stage_start = perf_counter()
-			predict_features_with_confidence(model, feature_vector)
+			predict_features_with_confidence(svm_model, feature_vector)
 			timing_classify += perf_counter() - stage_start
 
 		preprocessing_time_seconds = timing_preprocess
@@ -433,42 +464,52 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
 			preprocessing_time_seconds + segmentation_time_seconds + feature_extraction_time_seconds + classification_time_seconds
 		) / max(len(test_indices), 1)
 
-	# False negative analysis on the SVM model.
-	false_negative_paths = save_false_negative_examples(
-		image_paths_test,
-		split.y_test,
-		svm_predictions,
-		output_dirs["false_negatives"],
-		original_images=original_test_images,
-		masks=test_masks,
-		confidences=svm_confidences,
-	)
-	print(f"False negatives found: {len(false_negative_paths)}")
-
-	# Save gallery and HOG visualisations.
-	gallery_paths = save_annotated_predictions(
-		model,
-		image_paths_test,
-		output_dirs["gallery"],
-		output_dirs["figures"],
-		hog_parameters=hog_parameters,
-		segmentation_method=args.segmentation_method,
-		use_glcm=args.use_glcm,
-		use_orb=args.use_orb,
-		use_clahe=True,
-		clahe_clip=float(args.clahe_clip),
-		clahe_grid=(int(args.clahe_grid[0]), int(args.clahe_grid[1])),
-		morph_kernel_size=args.morph_kernel_size,
-		ground_truth_root=dataset_dir,
-	)
-	feature_visual_paths = save_hog_visualisations(
-		image_paths_test,
-		output_dirs["features"],
-		max_examples=min(3, max(1, int(args.num_sample_predictions))),
-		hog_parameters=hog_parameters,
-		clahe_clip=float(args.clahe_clip),
-		clahe_grid=(int(args.clahe_grid[0]), int(args.clahe_grid[1])),
-	)
+	prediction_paths: list[Path] = []
+	hog_visual_paths: list[Path] = []
+	if args.generate_assets:
+		prediction_sample_paths = select_diverse_sample_paths(image_paths_test, split.y_test, max(1, int(args.num_sample_predictions)))
+		for index, image_path in enumerate(prediction_sample_paths, start=1):
+			original_image = load_original_image(image_path)
+			enhanced_image = preprocess_image(original_image, preprocessing_settings)
+			segmentation_mask, contour_overlay, suspicious_mask = segment_defects(enhanced_image, args.morph_kernel_size)
+			masked_image = enhanced_image.copy()
+			masked_image[suspicious_mask == 0] = 0
+			predicted_label, confidence = predict_image(
+				svm_model,
+				masked_image,
+				hog_parameters=hog_parameters,
+				full_image=enhanced_image,
+			)
+			ground_truth_label = infer_label_from_path(image_path, dataset_dir)
+			prediction_folder = output_dirs["predictions_correct"] if predicted_label == ground_truth_label else output_dirs["predictions_incorrect"]
+			prediction_path = prediction_folder / f"prediction_{index:02d}_{image_path.stem}_pred-{predicted_label}_conf-{confidence:.3f}.png"
+			save_case_artifacts(
+				original_image=original_image,
+				enhanced_image=enhanced_image,
+				segmentation_mask=segmentation_mask,
+				contour_overlay=contour_overlay,
+				predicted_label=predicted_label,
+				ground_truth_label=ground_truth_label,
+				confidence=confidence,
+					output_path=prediction_path,
+			)
+			prediction_paths.append(prediction_path)
+		feature_sample_paths: list[Path] = []
+		for label in ("tumour", "no_tumour"):
+			label_paths = [path for path, sample_label in zip(image_paths_test, split.y_test) if sample_label == label]
+			label_samples = select_diverse_sample_paths(label_paths, [label] * len(label_paths), min(3, len(label_paths)))
+			feature_sample_paths.extend(label_samples)
+		if not feature_sample_paths:
+			feature_sample_paths = select_diverse_sample_paths(image_paths_test, split.y_test, min(6, max(1, int(args.num_sample_predictions) * 2)))
+		feature_visual_paths = save_hog_visualisations(
+			feature_sample_paths,
+			output_dirs["hog_examples"],
+			max_examples=6,
+			hog_parameters=hog_parameters,
+		)
+		hog_visual_paths = feature_visual_paths
+	else:
+		print("Asset generation skipped; use --generate-assets to export prediction composites and HOG visuals.")
 
 	timing_summary = {
 		"preprocessing_time_seconds": preprocessing_time_seconds / max(len(dataset.images), 1),
@@ -483,9 +524,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
 		"rf_inference_time_per_image_seconds": rf_inference_time_per_image_seconds,
 		"baseline_inference_time_per_image_seconds": baseline_inference_time_per_image_seconds,
 	}
-	(report_dir / "timing.txt").write_text(format_timing_summary(timing_summary), encoding="utf-8")
-	save_multi_method_comparison_report_with_timing(method_metrics, output_dirs["comparisons"] / "method_comparison.md", timing_summary)
-	save_efficiency_report(timing_summary, output_dirs["comparisons"] / "efficiency_metrics.md")
+	(output_dirs["runtime"] / "runtime_summary.txt").write_text(format_timing_summary(timing_summary), encoding="utf-8")
 
 	return {
 		"svm_metrics": svm_metrics,
@@ -495,9 +534,8 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, object]:
 		"svm_model_path": args.model_path,
 		"rf_model_path": args.rf_model_path,
 		"baseline_model_path": args.baseline_model_path,
-		"gallery_paths": gallery_paths,
-		"feature_visual_paths": feature_visual_paths,
-		"false_negative_paths": false_negative_paths,
+		"prediction_paths": prediction_paths,
+		"feature_visual_paths": hog_visual_paths,
 	}
 
 
@@ -541,8 +579,7 @@ def main() -> int:
 	print(f"  SVM inference time / image: {results['timing']['svm_inference_time_per_image_seconds']:.6f} s")
 	print(f"  RF inference time / image: {results['timing']['rf_inference_time_per_image_seconds']:.6f} s")
 	print(f"  Baseline inference time / image: {results['timing']['baseline_inference_time_per_image_seconds']:.6f} s")
-	print(f"False-negative examples saved: {len(results['false_negative_paths'])}")
-	print(f"Gallery images saved: {len(results['gallery_paths'])}")
+	print(f"Prediction composites saved: {len(results['prediction_paths'])}")
 	print(f"HOG feature visualisations saved: {len(results['feature_visual_paths'])}")
 	return 0
 

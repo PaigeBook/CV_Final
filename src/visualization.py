@@ -10,21 +10,36 @@ import numpy as np
 
 
 def ensure_output_structure(output_dir: Path) -> dict[str, Path]:
-    """Create a minimal, consolidated output structure.
+    """Create the consolidated coursework output structure."""
 
-    We avoid a separate `figures/` folder and instead place report figures
-    under `reports/comparisons` to reduce duplication.
-    """
+    evaluation_dir = output_dir / "evaluation"
+    predictions_dir = output_dir / "predictions"
+    predictions_correct_dir = predictions_dir / "correct"
+    predictions_incorrect_dir = predictions_dir / "incorrect"
+    features_dir = output_dir / "features"
+    hog_examples_dir = features_dir / "hog_examples"
+    runtime_dir = output_dir / "runtime"
 
-    cases_dir = output_dir / "cases"
-    reports_dir = output_dir / "reports"
-    comparisons_dir = reports_dir / "comparisons"
-    for directory in (output_dir, cases_dir, reports_dir, comparisons_dir):
+    for directory in (
+        output_dir,
+        evaluation_dir,
+        predictions_dir,
+        predictions_correct_dir,
+        predictions_incorrect_dir,
+        features_dir,
+        hog_examples_dir,
+        runtime_dir,
+    ):
         directory.mkdir(parents=True, exist_ok=True)
     return {
-        "cases": cases_dir,
-        "reports": reports_dir,
-        "comparisons": comparisons_dir,
+        "root": output_dir,
+        "evaluation": evaluation_dir,
+        "predictions": predictions_dir,
+        "predictions_correct": predictions_correct_dir,
+        "predictions_incorrect": predictions_incorrect_dir,
+        "features": features_dir,
+        "hog_examples": hog_examples_dir,
+        "runtime": runtime_dir,
     }
 
 
@@ -57,25 +72,24 @@ def save_case_artifacts(
     contour_overlay: np.ndarray,
     predicted_label: str,
     output_path: Path,
+    ground_truth_label: str | None = None,
+    confidence: float | None = None,
 ) -> None:
-    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
-    axes = axes.ravel()
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5))
 
-    axes[0].imshow(cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB))
+    axes[0].imshow(cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB) if original_image.ndim == 3 else original_image, cmap="gray")
     axes[0].set_title("Original MRI")
     axes[0].axis("off")
 
-    axes[1].imshow(enhanced_image, cmap="gray")
-    axes[1].set_title("Enhanced image")
+    overlay_image = cv2.cvtColor(contour_overlay, cv2.COLOR_BGR2RGB) if contour_overlay.ndim == 3 else contour_overlay
+    axes[1].imshow(overlay_image, cmap="gray")
+    title = f"Segmentation overlay\nPredicted: {predicted_label}"
+    if ground_truth_label is not None:
+        title += f"\nGround truth: {ground_truth_label}"
+    if confidence is not None:
+        title += f"\nConfidence: {confidence:.3f}"
+    axes[1].set_title(title)
     axes[1].axis("off")
-
-    axes[2].imshow(segmentation_mask, cmap="gray")
-    axes[2].set_title("Segmentation mask")
-    axes[2].axis("off")
-
-    axes[3].imshow(cv2.cvtColor(contour_overlay, cv2.COLOR_BGR2RGB))
-    axes[3].set_title(f"Contour overlay\nPrediction: {predicted_label}")
-    axes[3].axis("off")
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=200)

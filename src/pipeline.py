@@ -15,7 +15,6 @@ from src.segmentation import segment_suspicious_region
 from src.visualization import (
     ensure_output_structure,
     save_case_artifacts,
-    save_case_comparison_grid,
     save_confusion_matrix,
 )
 
@@ -73,37 +72,29 @@ def run_pipeline(config: ProjectConfig, sample_limit: int = 4) -> dict[str, obje
     model.fit(split.x_train, split.y_train)
 
     metrics = evaluate_classifier(model, split.x_test, split.y_test)
-    save_confusion_matrix(metrics["confusion_matrix"], output_paths["reports"] / "comparisons" / "confusion_matrix.png")
+    save_confusion_matrix(metrics["confusion_matrix"], output_paths["evaluation"] / "confusion_matrix_svm.png")
 
     sample_count = min(sample_limit, len(previews))
-    selected_indices = np.random.default_rng(config.random_state).choice(
-        len(previews),
-        size=sample_count,
-        replace=False,
-    )
-
-    comparison_items: list[tuple[np.ndarray, str, str]] = []
+    # Use a non-deterministic RNG so selected cases vary between runs.
+    # If reproducibility is needed, pass a seeded RNG or set `config.random_state` externally.
+    rng = np.random.default_rng()
+    selected_indices = rng.choice(len(previews), size=sample_count, replace=False)
 
     for index, preview_index in enumerate(selected_indices, start=1):
         image_path, preview, label, feature_vector = previews[int(preview_index)]
         actual_label = "tumour" if label == 1 else "no_tumour"
         predicted_label = "tumour" if model.predict(feature_vector.reshape(1, -1))[0] == 1 else "no_tumour"
-        comparison_items.append((preview["original_image"], actual_label, predicted_label))
+        output_folder = output_paths["predictions_correct"] if predicted_label == actual_label else output_paths["predictions_incorrect"]
         save_case_artifacts(
             original_image=preview["original_image"],
             enhanced_image=preview["enhanced_image"],
             segmentation_mask=preview["segmentation_mask"],
             contour_overlay=preview["contour_overlay"],
             predicted_label=predicted_label,
-            output_path=output_paths["cases"] / f"case_{index:02d}_{image_path.stem}.png",
+            output_path=output_folder / f"prediction_{index:02d}_{image_path.stem}_pred-{predicted_label}.png",
         )
 
-    save_case_comparison_grid(
-        comparison_items,
-        output_paths["reports"] / "comparisons" / "random_case_comparison.png",
-    )
-
-    report_path = output_paths["reports"] / "metrics.txt"
+    report_path = output_paths["evaluation"] / "metrics.txt"
     report_path.write_text(
         "\n".join(
             [
